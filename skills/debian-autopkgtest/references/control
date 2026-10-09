@@ -1,0 +1,3 @@
+Tests: smoke
+Restrictions: allow-stderr
+Depends: @, <runtime-deps>
