@@ -112,6 +112,16 @@ getbuildlog <pkg> <version> <arch>
 - If `getbuildlog` with an explicit version fails, try `getbuildlog <pkg> last <arch>` — it falls back to fetching the latest build log for that architecture.
 - Inspecting the log tail: the failure is usually near the end. Search for `Error`, `error:`, `assertion failed`, `cannot find` to locate the root cause quickly.
 
+### Architecture-specific format string failures
+
+On architectures where `unsigned long != unsigned long long` (ppc64el, loong64, riscv64), `__u64` is typedef'd to `unsigned long`, causing `-Werror=format` failures when using `%llu`/`%lld`. Fix by:
+
+1. Add `#include <inttypes.h>`
+2. Use `PRIu64`/`PRId64`/`PRIx64`/`SCNu64` macros with explicit `(uint64_t)` cast for `printf`/`scanf` format strings
+3. Example: `printf("%" PRIu64 "\n", (uint64_t)val);`
+
+When a new failure appears in the same class as an existing patch (e.g., another `__u64` format string), check whether the patch covers all affected files — grep for `%llu`/`%lld` in the relevant source directory and compare against the patch file list.
+
 ### Distinguish bug categories from build logs
 
 A build log failure may look like a known BTS bug but be a different root cause:
