@@ -161,6 +161,41 @@ quilt refresh
 
 The reject file shows the exact diff that failed — apply it manually, then refresh.
 
+## Patches Applying with Fuzz/Offset on Modified Files
+
+When a new patch is applied on top of existing patches that modified the same file, the line numbers may have shifted. Quilt will apply the patch with "fuzz" and an "offset" (e.g., "Hunk #1 succeeded at 196 with fuzz 2 (offset 2 lines)").
+
+**After such an apply, always run `quilt refresh`** to update the patch's context lines and line numbers to match the current source state. This ensures the patch applies cleanly on future builds without fuzz.
+
+```bash
+# After quilt push shows fuzz/offset:
+quilt refresh
+# Then verify clean re-apply:
+quilt pop -a && quilt push -a
+```
+
+**Why**: The patch was generated against the original file (without earlier patches). When earlier patches shift line numbers, quilt adjusts dynamically, but the patch file on disk still has the old line numbers. `quilt refresh` rewrites the patch with correct context for the current patched state.
+
+## Pitfall: Do Not Use `sort` on Structured C Header Output
+
+When patching a Makefile rule that generates a C header (e.g., `bpftool gen skeleton`), **never pipe through `sort` or similar text-processing tools**. The output is structured C code:
+- Header guards: `#ifndef FOO_H`, `#define FOO_H`
+- Extern "C" blocks: `#ifdef __cplusplus`
+- Data arrays: `static const char data[] = "..."`
+- Closing: `#endif`
+
+`sort` reorders lines alphabetically, destroying the C syntax and causing compilation errors like:
+- `expected identifier or '(' before 'if'`
+- `#endif without #if`
+- `missing terminating \" character`
+- `unterminated #ifdef`
+
+**Correct approach for reproducibility**: Use `LC_ALL=C` to make the generator's internal hash iteration deterministic. For `bpftool gen skeleton`:
+```make
+$(Q)LC_ALL=C $(BPFTOOL) gen skeleton $< > $@
+```
+This fixes non-determinism from locale-dependent hash table ordering without breaking the output structure.
+
 ## Format String Fixes for Architecture-Portable Code
 
 When fixing printf/scanf format warnings for integer types that vary across architectures (e.g., `__u64`, `__s64`, `uint64_t`, `int64_t` on ppc64el, loong64, riscv64 where `unsigned long` != `unsigned long long`):
