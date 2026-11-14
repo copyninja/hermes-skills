@@ -75,6 +75,46 @@ Do NOT use for ad-hoc test results without API access (use the web UI or getbuil
 - Submitting a package without ATE is a waste of debci slots — check `debian/control` first.
 - CI is a shared resource; do not submit repeated test runs.
 
+## Monitoring Package Acceptance and Build Status (Cron Pattern)
+
+Use cron jobs to automatically track a package from upload through acceptance to build results across architectures.
+
+**IMPORTANT**: debci only tracks packages with `Testsuite: autopkgtest` in debian/control. For packages without autopkgtest, use the authoritative archive/buildd tools below.
+
+### 1. Acceptance Check (every 30m)
+
+```bash
+# Via cronjob_manage or systemd timer
+rmadison <package>
+# Or check tracker.debian.org/pkg/<package> for version in unstable
+```
+
+**Trigger**: Run after uploading a new version. Stop when version appears under 'unstable' suite in rmadison output.
+
+### 2. Build Status Across Architectures (hourly, after acceptance)
+
+```bash
+# For each architecture:
+getbuildlog <package> <version> <arch>
+# Parse log for 'Status: successful' or 'Status: failed'
+# Architectures: amd64, arm64, armhf, ppc64el, s390x, riscv64, loong64, mips64el
+```
+
+**Report**: Table of architecture → status (PASSED/FAILED/PENDING/NOT SCHEDULED). For failures, fetch build logs via `getbuildlog`.
+
+### 3. autopkgtest CI Status (debci) — only if Testsuite: autopkgtest exists
+
+```bash
+bash ~/.hermes/skills/debian/debci-api/scripts/debci.sh pkg-results <package>
+# Parse output for version <ver> across arches
+```
+
+### Cron Job Configuration
+
+- Acceptance check: `schedule: "30m"`, `skills: ["debci-api"]`, `continuity: true`
+- Build status check: `schedule: "1h"`, `skills: ["debci-api"]`, `continuity: true`
+- Deliver to `origin` (the chat that created the job)
+
 ## Verification
 
 - `hermes skills check debci-api` — section-order audit passes.
