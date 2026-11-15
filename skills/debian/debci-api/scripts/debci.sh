@@ -72,13 +72,15 @@ package_results() {
     local key
     key=$(get_key)
     curl -s -H "Auth-Key: $key" "$BASE_URL/test?since=0" | python3 -c "
-import sys, json
+import sys, json, os
+package = os.environ.get('PKG', '')
 data = json.load(sys.stdin)
 for r in data.get('results', []):
     pkg = r.get('package') or ''
-    if pkg == '$package':
+    if pkg == package:
         status = r.get('status') or 'queued'
-        print(f\"  {r.get('suite',''):12s} {r.get('arch',''):8s} {r.get('version',''):20s} {status:8s} run_id={r.get('run_id','')}\")
+        print('  {0:12s} {1:8s} {2:20s} {3:8s} run_id={4}'.format(
+            r.get('suite',''), r.get('arch',''), r.get('version',''), status, r.get('run_id','')))
 "
 }
 
@@ -147,7 +149,7 @@ case "${1:-}" in
     submit)      submit "$2" "$3" "$4" "${5:-5}" ;;
     submit-batch) submit_batch "$2" "$3" "$4" "${5:-5}" ;;
     results)     results "$2" ;;
-    pkg-results) package_results "$2" ;;
+    pkg-results) PKG="$2" package_results "$2" ;;
     retry)       retry "$2" ;;
     publish)     publish "$2" ;;
     packages)    list_packages "${2:-}" "${3:-50}" ;;
