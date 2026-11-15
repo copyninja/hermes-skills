@@ -13,15 +13,11 @@ if [ -z "$PACKAGE" ]; then
     exit 2
 fi
 
-# Source the debci helper
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/debci.sh" 2>/dev/null || {
-    echo "ERROR: debci.sh not found in $SCRIPT_DIR" >&2
-    exit 2
-}
+DEBIAN_SKILLS_DIR="/home/vasudev/devel/hermes-skills/skills/debian"
+DEBCI_SCRIPT="$DEBIAN_SKILLS_DIR/debci-api/scripts/debci.sh"
 
-# Get results
-RESULTS=$(debci_pkg_results "$PACKAGE" 2>&1) || {
+# Get results by calling debci.sh as subprocess
+RESULTS=$("$DEBCI_SCRIPT" pkg-results "$PACKAGE" 2>&1) || {
     echo "ERROR: debci query failed" >&2
     exit 2
 }

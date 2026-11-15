@@ -22,19 +22,25 @@ echo "=== Buildd Status for $PACKAGE $VERSION ==="
 printf "%-12s %-15s %s\n" "ARCH" "STATUS" "DETAILS"
 
 for arch in $ARCHES; do
-    LOGFILE="/tmp/${PACKAGE}_${VERSION}_${arch}.log"
-    
-    if getbuildlog "$PACKAGE" "$VERSION" "$arch" > "$LOGFILE" 2>/dev/null; then
-        if grep -q "Status: successful" "$LOGFILE"; then
-            FINISHED=$(grep "Finished at" "$LOGFILE" | head -1 | sed 's/.*Finished at //')
-            printf "%-12s %-15s %s\n" "$arch" "✅ PASSED" "$FINISHED"
-            PASSED=$((PASSED + 1))
-        elif grep -q "Status: failed" "$LOGFILE"; then
-            ERROR=$(grep -A3 "Status: failed" "$LOGFILE" | head -4 | tr '\n' '; ')
-            printf "%-12s %-15s %s\n" "$arch" "❌ FAILED" "$ERROR"
-            FAILED=$((FAILED + 1))
+    echo "  Checking $arch..." >&2
+    # getbuildlog saves to current directory, run from /tmp
+    if timeout 60 bash -c "cd /tmp && getbuildlog '$PACKAGE' '$VERSION' '$arch'" >/dev/null 2>&1; then
+        # Find the downloaded log file in /tmp
+        LOGFILE=$(ls -t /tmp/${PACKAGE}_${VERSION}_${arch}.log* 2>/dev/null | head -1)
+        if [ -n "$LOGFILE" ] && [ -s "$LOGFILE" ]; then
+            if grep -q "Status: successful" "$LOGFILE"; then
+                FINISHED=$(grep "Finished at" "$LOGFILE" | head -1 | sed 's/.*Finished at //')
+                printf "%-12s %-15s %s\n" "$arch" "✅ PASSED" "$FINISHED"
+                PASSED=$((PASSED + 1))
+            elif grep -q "Status: failed" "$LOGFILE"; then
+                ERROR=$(grep -A3 "Status: failed" "$LOGFILE" | head -4 | tr '\n' '; ')
+                printf "%-12s %-15s %s\n" "$arch" "❌ FAILED" "$ERROR"
+                FAILED=$((FAILED + 1))
+            else
+                printf "%-12s %-15s %s\n" "$arch" "⏳ UNKNOWN" "Log exists but no status"
+            fi
         else
-            printf "%-12s %-15s %s\n" "$arch" "⏳ UNKNOWN" "Log exists but no status"
+            echo "  $arch: log file empty or not found" >&2
         fi
     else
         # Check if it's Needs-Build or not scheduled

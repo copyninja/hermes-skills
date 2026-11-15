@@ -19,7 +19,7 @@ OUTPUT=$(rmadison "$PACKAGE" 2>&1) || {
     exit 2
 }
 
-if echo "$OUTPUT" | awk -v ver="$VERSION" '$2 == ver && $4 == "unstable" {found=1} END {exit !found}'; then
+if echo "$OUTPUT" | awk -F'|' -v ver="$VERSION" '$2 ~ ver && $3 ~ /unstable/ {found=1} END {exit !found}'; then
     echo "ACCEPTED: $PACKAGE $VERSION in unstable"
     echo "$OUTPUT" | grep "$VERSION"
     exit 0
