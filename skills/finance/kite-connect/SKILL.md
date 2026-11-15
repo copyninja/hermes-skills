@@ -20,6 +20,7 @@ Manage Kite Connect v3 authentication (daily login flow) and read-only portfolio
 
 - Daily morning: run `kite_bridge auth` to complete login flow and store `access_token` (valid until 6 AM next day).
 - Anytime: `kite_bridge holdings`, `kite_bridge positions`, `kite_bridge margins` to fetch read-only data.
+- **Mutual Funds**: `kite_bridge mf-holdings`, `kite_bridge mf-orders`, `kite_bridge mf-sips`, `kite_bridge mf-xirr`
 - Cron reminder at 6:05 AM: "Token expired, run `kite_bridge auth`".
 
 ## Prerequisites
@@ -84,6 +85,30 @@ cd ~/devel/hermes-skills/skills/finance/kite-connect && .venv/bin/python -m scri
 ```
 Returns JSON: `{"status": "valid|expired|no_token", "valid": true|false, "expires_at": "...", "remaining_hours": N, "remaining_minutes": M}`
 
+### Get MF Holdings
+```bash
+cd ~/devel/hermes-skills/skills/finance/kite-connect && .venv/bin/python -m scripts.kite_bridge mf-holdings
+```
+Returns JSON array of MF holdings with fund name, folio, quantity, NAV, average price.
+
+### Get MF Orders (last 7 days)
+```bash
+cd ~/devel/hermes-skills/skills/finance/kite-connect && .venv/bin/python -m scripts.kite_bridge mf-orders
+```
+Returns JSON array of recent MF orders (BUY/SELL/SIP) with status, amounts, NAV dates.
+
+### Get Active SIPs
+```bash
+cd ~/devel/hermes-skills/skills/finance/kite-connect && .venv/bin/python -m scripts.kite_bridge mf-sips
+```
+Returns JSON array of SIPs with frequency, amount, status, step-up details.
+
+### Compute MF XIRR
+```bash
+cd ~/devel/hermes-skills/skills/finance/kite-connect && .venv/bin/python -m scripts.kite_bridge mf-xirr
+```
+Returns XIRR (annualized return) per fund + portfolio-level. **Note**: Limited by Kite API 7-day order history; uses simple returns as fallback.
+
 ## Procedure: Daily Auth
 
 1. Run `kite_bridge auth` (starts HTTP server on `localhost:8765`).
@@ -131,6 +156,10 @@ All read commands:
 - `kite_bridge holdings` → returns array of holdings with `tradingsymbol`, `quantity`, `pnl`, `last_price`.
 - `kite_bridge margins` → returns `equity.net`, `equity.available.cash`, `commodity.net`.
 - `kite_bridge status` → shows `{"status": "valid", "valid": true, "remaining_hours": 14, "remaining_minutes": 32}` or `{"status": "expired", "valid": false}`.
+- `kite_bridge mf-holdings` → 6 funds with fund name, folio, quantity, NAV, avg price.
+- `kite_bridge mf-orders` → recent orders with status, transaction_type, amount.
+- `kite_bridge mf-sips` → 4 SIPs (all PAUSED) with frequency, instalment_amount, step_up.
+- `kite_bridge mf-xirr` → per-fund simple returns + portfolio XIRR (limited by 7-day order history).
 
 ## References
 
