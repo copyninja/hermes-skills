@@ -1,0 +1,46 @@
+#!/usr/bin/env python3
+"""CLI: Fetch maintainer dashboard from UDD DDPO."""
+
+import argparse
+import sys
+import os
+sys.path.insert(0, os.path.dirname(__file__))
+from udd_cgi import get_maintainer_summary
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Fetch maintainer summary from UDD DDPO")
+    parser.add_argument("email", help="Maintainer email address")
+    parser.add_argument("--json", action="store_true", help="Output as JSON")
+    parser.add_argument("--limit", type=int, default=0, help="Limit results")
+    parser.add_argument("--rc-only", action="store_true", help="Show only packages with RC bugs")
+    args = parser.parse_args()
+
+    entries = get_maintainer_summary(args.email)
+
+    if args.rc_only:
+        entries = [e for e in entries if e.rc > 0]
+
+    if args.limit:
+        entries = entries[:args.limit]
+
+    if args.json:
+        import json
+        print(json.dumps([{
+            "package": e.package,
+            "total": e.total,
+            "rc": e.rc,
+            "done": e.done,
+            "pending": e.pending,
+            "forwarded": e.forwarded
+        } for e in entries], indent=2))
+    else:
+        for e in entries:
+            print(f"{e.package:30s} total={e.total:4d} rc={e.rc:3d} done={e.done:3d} pending={e.pending:3d} forwarded={e.forwarded:3d}")
+        print(f"\nTotal: {len(entries)} packages for {args.email}")
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,45 @@
+#!/usr/bin/env python3
+"""CLI: Fetch FTBFS packages for arch/release from UDD."""
+
+import argparse
+import sys
+import os
+sys.path.insert(0, os.path.dirname(__file__))
+from udd_cgi import UDDClient
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Fetch FTBFS packages from UDD")
+    parser.add_argument("--arch", default="amd64", help="Architecture (amd64, arm64, ppc64el, etc.)")
+    parser.add_argument("--release", default="trixie", help="Release (trixie, sid, bookworm, etc.)")
+    parser.add_argument("--json", action="store_true", help="Output as JSON")
+    parser.add_argument("--limit", type=int, default=0, help="Limit results")
+    args = parser.parse_args()
+
+    client = UDDClient()
+    entries = client.ftbfs(args.arch, args.release)
+
+    if args.limit:
+        entries = entries[:args.limit]
+
+    if args.json:
+        import json
+        print(json.dumps([{
+            "package": e.package,
+            "version": e.version,
+            "arch": e.arch,
+            "release": e.release,
+            "bug": e.bug_number,
+            "log_url": e.log_url
+        } for e in entries], indent=2))
+    else:
+        for e in entries:
+            bug = f" #{e.bug_number}" if e.bug_number else ""
+            print(f"{e.package:30s} {e.version:20s} {e.arch:10s} {e.release:10s}{bug}")
+        print(f"\nTotal: {len(entries)} FTBFS packages on {args.arch}/{args.release}")
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

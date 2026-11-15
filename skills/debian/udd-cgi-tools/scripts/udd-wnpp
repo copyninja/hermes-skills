@@ -1,0 +1,52 @@
+#!/usr/bin/env python3
+"""CLI: Fetch WNPP (orphaned/RFA/ITA) packages from UDD."""
+
+import argparse
+import sys
+import os
+import re
+sys.path.insert(0, os.path.dirname(__file__))
+from udd_cgi import UDDClient
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Fetch WNPP packages from UDD")
+    parser.add_argument("--json", action="store_true", help="Output as JSON")
+    parser.add_argument("--limit", type=int, default=0, help="Limit results")
+    args = parser.parse_args()
+
+    client = UDDClient()
+    html = client.wnpp_checks()
+
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(html, "html.parser")
+    entries = []
+    for link in soup.find_all("a", href=True):
+        href = link["href"]
+        if "bugs.debian.org" in href:
+            bug_match = re.search(r'/(\d+)', href)
+            bug_num = bug_match.group(1) if bug_match else ""
+            link_text = link.get_text(strip=True)
+            parent_text = link.parent.get_text(strip=True) if link.parent else ""
+            pkg_match = re.match(r"([^:#]+):", parent_text)
+            package = pkg_match.group(1) if pkg_match else ""
+            type_match = re.search(r'\((\w+)\)', link_text)
+            wnpp_type = type_match.group(1) if type_match else ""
+            entries.append({"bug": bug_num, "package": package, "type": wnpp_type, "context": parent_text})
+
+    if args.limit:
+        entries = entries[:args.limit]
+
+    if args.json:
+        import json
+        print(json.dumps(entries, indent=2))
+    else:
+        for e in entries:
+            print(f"#{e['bug']:<7s} {e['type']:<4s} {e['package']:40s} {e['context'][:80]}")
+        print(f"\nTotal: {len(entries)} WNPP entries")
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

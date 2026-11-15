@@ -1,0 +1,49 @@
+#!/usr/bin/env python3
+"""CLI: Fetch packages flagged for autoremoval from UDD."""
+
+import argparse
+import sys
+import os
+sys.path.insert(0, os.path.dirname(__file__))
+from udd_cgi import UDDClient
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Fetch autoremoval candidates from UDD")
+    parser.add_argument("--json", action="store_true", help="Output as JSON")
+    parser.add_argument("--limit", type=int, default=0, help="Limit results")
+    args = parser.parse_args()
+
+    client = UDDClient()
+    text = client.autoremovals()
+
+    entries = []
+    current_maintainer = None
+    for line in text.strip().split("\n"):
+        line = line.strip()
+        if not line or line.startswith("http") or line.startswith("generated"):
+            continue
+        if "@" in line and line.endswith(">"):
+            current_maintainer = line
+        elif current_maintainer and line and ":" in line:
+            pkg, rest = line.split(":", 1)
+            pkg = pkg.strip()
+            if pkg and not pkg.startswith("***"):
+                entries.append({"maintainer": current_maintainer, "package": pkg, "details": rest.strip()})
+
+    if args.limit:
+        entries = entries[:args.limit]
+
+    if args.json:
+        import json
+        print(json.dumps(entries, indent=2))
+    else:
+        for e in entries:
+            print(f"{e['package']:30s} {e['maintainer']:40s} {e['details'][:80]}")
+        print(f"\nTotal: {len(entries)} packages flagged for autoremoval")
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

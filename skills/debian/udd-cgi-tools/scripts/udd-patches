@@ -1,0 +1,40 @@
+#!/usr/bin/env python3
+"""CLI: Fetch bugs with patches for specific packages from UDD."""
+
+import argparse
+import sys
+import os
+sys.path.insert(0, os.path.dirname(__file__))
+from udd_cgi import UDDClient
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Fetch bugs with patches from UDD")
+    parser.add_argument("packages", nargs="*", help="Package names to filter (default: all)")
+    parser.add_argument("--json", action="store_true", help="Output as JSON")
+    parser.add_argument("--limit", type=int, default=0, help="Limit results")
+    args = parser.parse_args()
+
+    client = UDDClient()
+    bugs = client.bugs_with_patches(args.packages if args.packages else None)
+
+    if args.limit:
+        bugs = bugs[:args.limit]
+
+    if args.json:
+        import json
+        print(json.dumps([{
+            "package": b.package,
+            "bug": b.bug_number,
+            "url": b.url
+        } for b in bugs], indent=2))
+    else:
+        for b in bugs:
+            print(f"{b.package:30s} #{b.bug_number:<7d} {b.url}")
+        print(f"\nTotal: {len(bugs)} bugs with patches")
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
