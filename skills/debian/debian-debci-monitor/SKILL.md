@@ -93,6 +93,20 @@ deliver: "origin"
 - debci is shared resource — don't oversubmit
 - Results may lag buildd completion by hours
 
+## debci.sh Usage Lessons
+
+- **Functions not exported** — call as subprocess: `"$DEBCI_SCRIPT" pkg-results "$PACKAGE"`
+- **Output format** — `pkg-results` prints: `suite arch version status run_id=X` (space-separated, no headers)
+- **Empty results** — No output means package lacks `Testsuite: autopkgtest` or no runs exist
+- **API key** — Retrieved from gnome-keyring (`ci-debian-net`) via `get_key()`; never log it
+
+**Monitoring pattern**:
+```bash
+DEBCI_SCRIPT="/path/to/debci.sh"
+RESULTS=$("$DEBCI_SCRIPT" pkg-results "$PACKAGE" 2>&1)
+# Parse: awk '{print $1, $2, $3, $4, $5}' etc.
+```
+
 ## References
 
 - `debian-buildd-monitor` — prerequisite: builds must complete first

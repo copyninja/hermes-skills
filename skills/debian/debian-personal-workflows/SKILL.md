@@ -21,6 +21,8 @@ metadata:
 - gbp import-orig workflow for GitHub-tagged upstream releases
 - Porterbox testing before uploading ppc64el fixes
 - Font package specifics (fontconfig triggers, dh_fontconfig)
+- Go packages needing both `autopkgtest-pkg-go` (unit tests) and `autopkgtest` (binary smoke tests)
+- Prometheus exporter packages (smartctl_exporter, etc.) needing custom autopkgtest smoke tests
 
 # Vasudev's Personal Debian Packaging Workflows
 
@@ -133,4 +135,66 @@ ssh ppc64el.porter.debian.org sbuild -d unstable -A -a ppc64el ../<pkg>_<ver>.ds
 
 # gbp import upstream
 gbp import-orig --uscan --debian-branch=debian/sid --upstream-branch=upstream ../<pkg>_<newver>.orig.tar.xz
+```
+
+---
+
+## 8. Go Package autopkgtest (smartctl-exporter pattern)
+
+**Problem**: Go packages need both Go unit tests (`autopkgtest-pkg-go`) and binary smoke tests (`autopkgtest`) in Testsuite.
+
+**Solution**: Add both to `debian/control`:
+```
+Testsuite: autopkgtest-pkg-go, autopkgtest
+```
+
+**Smoke test template** (`debian/tests/smartctl-exporter-smoke`):
+- Binary existence check
+- `--help` / `--version` exit codes
+- Flag parsing with actual binary flags (no `--dry-run`, `--no-collector.smart`)
+- Systemd unit verification (check both `/lib` and `/usr/lib` paths)
+- Device/service dry-run with background process + `kill`/`wait` + `|| true`
+
+**Lintian warning**: `unnecessary-testsuite-autopkgtest-field` is a false positive when both testsuites are needed. Keep both.
+
+**Local test**:
+```bash
+export AUTOPKGTEST_TMP=/tmp/autopkgtest-tmp
+TMPDIR=/tmp/autopkgtest-tmp
+autopkgtest ../<pkg>_<ver>.dsc -- unshare --release=unstable
+```
+
+---
+
+## 9. Debian Package Monitoring Pipeline
+
+Complete pipeline: **Acceptance → Buildd → debci CI**
+
+**Three stages**:
+1. **Acceptance** — `rmadison` (authoritative archive query), check `unstable` suite
+2. **Buildd** — `getbuildlog` across all arches, parse `Status: successful`/`failed`/`Needs-Build`
+3. **debci CI** — debci API autopkgtest results (only if `Testsuite: autopkgtest` in control)
+
+**Scripts in `debian-package-pipeline-monitor` skill**:
+- `monitor-pipeline.sh` — orchestrates all three stages
+- Uses sub-skills: `debian-acceptance-monitor`, `debian-buildd-monitor`, `debian-debci-monitor`
+
+**Cron job**: `schedule: "30m"`, `script: "monitor-pipeline.sh"`, `continuity: true`
+
+---
+
+## 10. Buildd Monitoring Debugging Lessons
+
+- `getbuildlog` saves to **current working directory** — must run from `/tmp`
+- `getbuildlog` saves with `.N` suffix — find actual log via `ls -t /tmp/<pkg>_<ver>_<arch>.log* | head -1`
+- `getbuildlog` can hang — wrap with `timeout 60`
+- Build logs contain `Status: successful` / `Status: failed` and `Finished at` lines
+- `rmadison` output uses `|` delimiter — parse with `awk -F'|'`
+- `rmadison` columns: `pkg | version | suite | component` (split on `|`, trim spaces)
+
+**Working buildd check**:
+```bash
+cd /tmp && timeout 60 getbuildlog <pkg> <ver> <arch>
+LOGFILE=$(ls -t /tmp/<pkg>_<ver>_<arch>.log* | head -1)
+grep "Status: successful" "$LOGFILE"
 ```

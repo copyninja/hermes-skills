@@ -78,6 +78,19 @@ deliver: "origin"
 - Use `tracker.debian.org/pkg/<package>` as fallback for human-readable view
 - Only `unstable` (not `buildd-unstable` or `experimental`) means fully accepted
 
+## rmadison Parsing Lessons
+
+- `rmadison` output uses `|` delimiter — parse with `awk -F'|'`
+- Columns: `pkg | version | suite | component` (split on `|`, trim spaces)
+- Version field may have leading/trailing spaces — use regex match: `$2 ~ ver`
+- Suite field may have trailing spaces — match with regex: `$3 ~ /unstable/`
+
+**Working acceptance check**:
+```bash
+OUTPUT=$(rmadison "$PACKAGE")
+echo "$OUTPUT" | awk -F'|' -v ver="$VERSION" '$2 ~ ver && $3 ~ /unstable/ {found=1} END {exit !found}'
+```
+
 ## References
 
 - `debian-buildd-monitor` — next step after acceptance

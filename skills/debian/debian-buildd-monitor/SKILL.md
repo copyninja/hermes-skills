@@ -90,6 +90,19 @@ Porter arches (if applicable): `mips64el alpha hppa ...`
 - Builds can take hours to appear after archive acceptance
 - `Needs-Build` = not yet scheduled, not a failure
 - Porter arches often `BD-Uninstallable` due to missing build-deps
+- `getbuildlog` saves to **current working directory** — must run from `/tmp`
+- `getbuildlog` saves with `.N` suffix — find actual log via `ls -t /tmp/<pkg>_<ver>_<arch>.log* | head -1`
+- `getbuildlog` can hang — wrap with `timeout 60`
+- Build logs contain `Status: successful` / `Status: failed` and `Finished at` lines
+- `rmadison` output uses `|` delimiter — parse with `awk -F'|'`
+- `rmadison` columns: `pkg | version | suite | component` (split on `|`, trim spaces)
+
+**Working buildd check**:
+```bash
+cd /tmp && timeout 60 getbuildlog <pkg> <ver> <arch>
+LOGFILE=$(ls -t /tmp/<pkg>_<ver>_<arch>.log* | head -1)
+grep "Status: successful" "$LOGFILE"
+```
 - Re-run with `--git-ignore-new` if source tree has uncommitted changes
 
 ## References

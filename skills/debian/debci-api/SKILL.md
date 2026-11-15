@@ -75,6 +75,20 @@ Do NOT use for ad-hoc test results without API access (use the web UI or getbuil
 - Submitting a package without ATE is a waste of debci slots — check `debian/control` first.
 - CI is a shared resource; do not submit repeated test runs.
 
+## debci.sh Usage Lessons
+
+- **Functions not exported** — `debci.sh` functions (e.g., `debci_pkg_results`) are not exported; must call as subprocess: `"$DEBCI_SCRIPT" pkg-results "$PACKAGE"`
+- **Output format** — `pkg-results` prints: `suite arch version status run_id=X` (space-separated, no headers)
+- **Empty results** — No output means package lacks `Testsuite: autopkgtest` or no runs exist
+- **API key** — Retrieved from gnome-keyring (`ci-debian-net`) via `get_key()`; never log it
+
+**Monitoring pattern**:
+```bash
+DEBCI_SCRIPT="/path/to/debci.sh"
+RESULTS=$("$DEBCI_SCRIPT" pkg-results "$PACKAGE" 2>&1)
+# Parse: awk '{print $1, $2, $3, $4, $5}' etc.
+```
+
 ## Verification
 
 - `hermes skills check debci-api` — section-order audit passes.

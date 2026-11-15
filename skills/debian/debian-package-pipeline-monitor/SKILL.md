@@ -123,6 +123,13 @@ deliver: "origin"
 | Builds complete, CI pending | Retry debci next cycle |
 | All complete | Report success, continue monitoring for regressions |
 
+## Debugging Lessons
+
+- **Buildd stage**: `getbuildlog` must run from `/tmp` with `timeout 60`; logs saved with `.N` suffix
+- **Acceptance stage**: `rmadison` uses `|` delimiter; parse with `awk -F'|'`
+- **debci stage**: `debci.sh` functions not exported — call as subprocess; empty output = no `Testsuite: autopkgtest`
+- **Continuity**: Use `continuity: true` in cron for deduping across runs
+
 ## Cron Job Configuration
 
 ```yaml
