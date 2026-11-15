@@ -111,9 +111,37 @@ bash ~/.hermes/skills/debian/debci-api/scripts/debci.sh pkg-results <package>
 
 ### Cron Job Configuration
 
-- Acceptance check: `schedule: "30m"`, `skills: ["debci-api"]`, `continuity: true`
-- Build status check: `schedule: "1h"`, `skills: ["debci-api"]`, `continuity: true`
+- Acceptance check: `schedule: "30m"`, `skills: ["debci-api"]`, `continuity: true`, `script: "monitor-acceptance.sh"`
+- Build status check: `schedule: "1h"`, `skills: ["debci-api"]`, `continuity: true`, `script: "monitor-buildd.sh"`
+- debci CI check: `schedule: "1h"`, `skills: ["debci-api"]`, `continuity: true`, `script: "monitor-debci.sh"`
 - Deliver to `origin` (the chat that created the job)
+- Use `continuity: true` so each run sees previous output and can dedupe
+
+## Monitoring Scripts
+
+The skill includes three reusable scripts in `scripts/`:
+
+| Script | Purpose | Usage |
+|--------|---------|-------|
+| `monitor-acceptance.sh` | Check if package version accepted in unstable | `./monitor-acceptance.sh <package> <version>` |
+| `monitor-buildd.sh` | Check buildd status across all arches | `./monitor-buildd.sh <package> <version>` |
+| `monitor-debci.sh` | Check debci autopkgtest CI status | `./monitor-debci.sh <package> [version]` |
+
+All scripts:
+- Exit 0 on success, 1 on failure, 2 on error
+- Output summary table to stdout
+- Can be used directly in cron jobs via `script:` field
+- Respect `continuity: true` for deduping
+
+## Autopkgtest Testbed Setup
+
+When running autopkgtest locally with `-- unshare`, set a writable temp directory to avoid permission issues with `~/.hermes/cache/scratch`:
+
+```bash
+export AUTOPKGTEST_TMP=/tmp/autopkgtest-tmp
+TMPDIR=/tmp/autopkgtest-tmp
+autopkgtest <package>.dsc -- unshare --release=unstable
+```
 
 ## Verification
 

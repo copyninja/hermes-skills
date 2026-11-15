@@ -81,6 +81,11 @@ Do NOT use for one-off checks — use the `terminal` (getbuildlog) or `web_extra
 - Suite acceptance: ci.debian.net only accepts `unstable` for submissions; querying is fine for any suite, but submissions will be rejected for experimental.
 - API key must be captured via command substitution; never echo or log `$KEY`.
 - `@` in autopkgest Depends can cause badpkg in null runner — not relevant to monitoring but often confused with buildd.
+- **debci only tracks packages with `Testsuite: autopkgtest`** — for packages without autopkgtest, use `rmadison` (acceptance) and `getbuildlog` (buildd status) instead.
+- **Buildd acceptance check**: Use `rmadison <package>` — authoritative archive query. debci only shows results after package has `Testsuite: autopkgtest` and is uploaded.
+- **Buildd status across arches**: Use `getbuildlog <package> <version> <arch>` — parse for `Status: successful` / `failed` / `Needs-Build`.
+- **Lintian false positive**: `unnecessary-testsuite-autopkgtest-field` warns when both `autopkgtest-pkg-go` and `autopkgtest` are in Testsuite. Keep both — they serve different purposes (Go unit tests vs custom binary smoke tests).
+- **Cron job config**: Set `continuity: true` so each run sees previous output and can dedupe. Schedule: 30m for buildd acceptance/status, 60m for debci CI (if applicable).
 
 ## Verification
 
