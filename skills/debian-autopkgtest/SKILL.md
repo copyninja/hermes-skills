@@ -76,6 +76,12 @@ validated on a fresh system.
   time).
 - Check git tags before bumping the changelog (`debian/<version>-1` already
   tagged → increment to `-2`).
+- **set -e + kill exits script**: When a test script uses `set -e`, running `kill $PID` followed by `wait $PID` exits with 143 (SIGTERM) if the process is already dead. Add `|| true` to both: `kill $PID 2>/dev/null || true; wait $PID 2>/dev/null || true`.
+- **Exit 143 is expected**: Intentional `kill` of a background process returns 143 (SIGTERM). Treat 0 or 143 as PASS in flag-parsing and device-scan checks.
+- **Validate flags against actual binary**: Prometheus exporters (smartctl_exporter, etc.) do not have `--dry-run` or `--no-collector.smart`. Check `--help` output before writing test flags.
+- **Systemd unit path varies**: Check both `/lib/systemd/system/` and `/usr/lib/systemd/system/` for the service file.
+- **Autopkgtest temp dir permission issue**: When running `autopkgtest -- unshare` locally, `~/.hermes/cache/scratch` may have permission issues from previous mmdebstrap runs. Set `AUTOPKGTEST_TMP=/tmp/autopkgtest-tmp TMPDIR=/tmp/autopkgtest-tmp` before running.
+- **Lintian false positive**: `unnecessary-testsuite-autopkgtest-field` warns when both `autopkgtest-pkg-go` and `autopkgtest` are in Testsuite. This is intentional — the former runs Go unit tests, the latter runs custom binary smoke tests. Keep both.
 
 ## Verification
 
@@ -87,5 +93,5 @@ validated on a fresh system.
 ## Reference Files
 
 - `references/control` — generic example `debian/tests/control`.
-- `references/skeleton.sh` — minimal test script skeleton with runtime
-  prerequisite check pattern.
+- `references/skeleton.sh` — minimal test script skeleton with runtime prerequisite check pattern.
+- `references/go-binary-smoke.md` — Go binary smoke test pattern (smartctl_exporter, prometheus exporters): binary existence, `--help/--version`, flag parsing, systemd unit verification, device/service dry-run.
