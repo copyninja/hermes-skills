@@ -1,24 +1,26 @@
 #!/usr/bin/env python3
-"""Kite Connect bridge for Hermes Agent.
+"""Kite Connect bridge for Hermes Agent — Multi-Profile Support.
 
 Usage (via terminal tool):
-  python -m scripts.kite_bridge holdings
-  python -m scripts.kite_bridge positions
-  python -m scripts.kite_bridge margins
-  python -m scripts.kite_bridge profile
-  python -m scripts.kite_bridge status
-  python -m scripts.kite_bridge mf-holdings
-  python -m scripts.kite_bridge mf-orders
-  python -m scripts.kite_bridge mf-sips
-  python -m scripts.kite_bridge mf-xirr
-  python -m scripts.kite_bridge auth
+  python -m scripts.kite_bridge --profile default holdings
+  python -m scripts.kite_bridge --profile second positions
+  python -m scripts.kite_bridge --profile default margins
+  python -m scripts.kite_bridge --profile default profile
+  python -m scripts.kite_bridge --profile default status
+  python -m scripts.kite_bridge --profile default orders
+  python -m scripts.kite_bridge --profile default trades
+  python -m scripts.kite_bridge --profile default mf-holdings
+  python -m scripts.kite_bridge --profile default mf-orders
+  python -m scripts.kite_bridge --profile default mf-sips
+  python -m scripts.kite_bridge --profile default mf-xirr
+  python -m scripts.kite_bridge --list-profiles
 
 Returns JSON to stdout. Errors to stderr with non-zero exit code.
 """
+
+import argparse
 import json
-import os
 import sys
-from datetime import datetime
 from pathlib import Path
 
 # Ensure sibling modules are importable
@@ -28,24 +30,17 @@ if _SCRIPTS_DIR not in sys.path:
 
 from kite_auth import (
     load_config,
-    load_token,
+    list_profiles,
     api_get,
-    cmd_holdings,
-    cmd_positions,
-    cmd_margins,
-    cmd_profile,
-    cmd_status,
-    do_auth,
-    next_6am,
+    DEFAULT_PROFILE,
+    load_token,
 )
+from datetime import datetime
 
 
 def run_command(cfg: dict, command: str) -> int:
     """Execute a command and return exit code."""
-    if command == "auth":
-        ok = do_auth(cfg)
-        return 0 if ok else 1
-    elif command == "holdings":
+    if command == "holdings":
         data = api_get(cfg, "/portfolio/holdings")
         if data:
             print(json.dumps(data, ensure_ascii=False))
@@ -66,6 +61,18 @@ def run_command(cfg: dict, command: str) -> int:
     elif command == "profile":
         data = api_get(cfg, "/user/profile")
         if data:
+            print(json.dumps(data, ensure_ascii=False))
+            return 0
+        return 1
+    elif command == "orders":
+        data = api_get(cfg, "/orders")
+        if data is not None:
+            print(json.dumps(data, ensure_ascii=False))
+            return 0
+        return 1
+    elif command == "trades":
+        data = api_get(cfg, "/trades")
+        if data is not None:
             print(json.dumps(data, ensure_ascii=False))
             return 0
         return 1
@@ -129,19 +136,17 @@ def compute_mf_xirr(cfg: dict) -> dict:
     holdings = api_get(cfg, "/mf/holdings")
     if not holdings:
         return {"error": "No MF holdings found"}
-    
+
     # Get MF orders (last 7 days from API, but we need all)
     orders = api_get(cfg, "/mf/orders")
     if not orders:
         return {"error": "No MF orders found"}
-    
+
     # Build cashflows per fund (tradingsymbol/ISIN)
     # XIRR: sum of discounted cashflows = 0
     # Cashflows: negative for investments (BUY), positive for redemptions (SELL)
     # Current value as final positive cashflow
-    
-    from datetime import datetime
-    
+
     # Group orders by tradingsymbol
     fund_orders = {}
     for order in orders:
@@ -151,10 +156,10 @@ def compute_mf_xirr(cfg: dict) -> dict:
         if ts not in fund_orders:
             fund_orders[ts] = []
         fund_orders[ts].append(order)
-    
+
     results = {}
     today = datetime.now().date()
-    
+
     for holding in holdings:
         ts = holding.get("tradingsymbol")
         fund_name = holding.get("fund")
@@ -162,7 +167,7 @@ def compute_mf_xirr(cfg: dict) -> dict:
         current_nav = holding.get("last_price", 0)
         current_val = current_qty * current_nav
         avg_price = holding.get("average_price", 0)
-        
+
         if ts not in fund_orders:
             results[fund_name] = {
                 "tradingsymbol": ts,
@@ -175,30 +180,30 @@ def compute_mf_xirr(cfg: dict) -> dict:
                 "xirr_note": "No order history available"
             }
             continue
-        
+
         # Build cashflows: (date, amount)
         # BUY = negative (outflow), SELL = positive (inflow)
         cashflows = []
-        
+
         for order in fund_orders[ts]:
             txn_type = order.get("transaction_type", "").upper()
             amount = order.get("amount", 0)
             order_ts = order.get("order_timestamp", "")
-            
+
             try:
                 order_date = datetime.fromisoformat(order_ts.replace(" ", "T")).date()
             except Exception:
                 continue
-            
+
             if txn_type == "BUY":
                 cashflows.append((order_date, -amount))
             elif txn_type == "SELL":
                 cashflows.append((order_date, amount))
-        
+
         # Add current value as final cashflow (positive = redemption value)
         if current_val > 0:
             cashflows.append((today, current_val))
-        
+
         if len(cashflows) < 2:
             results[fund_name] = {
                 "tradingsymbol": ts,
@@ -211,10 +216,10 @@ def compute_mf_xirr(cfg: dict) -> dict:
                 "xirr_note": "Insufficient cashflows for XIRR"
             }
             continue
-        
+
         # Compute XIRR using Newton-Raphson
         xirr = compute_xirr(cashflows)
-        
+
         results[fund_name] = {
             "tradingsymbol": ts,
             "current_value": round(current_val, 2),
@@ -225,7 +230,7 @@ def compute_mf_xirr(cfg: dict) -> dict:
             "xirr_pct": round(xirr * 100, 2) if xirr else None,
             "cashflows_count": len(cashflows)
         }
-    
+
     # Portfolio-level XIRR
     all_cashflows = []
     for holding in holdings:
@@ -243,13 +248,13 @@ def compute_mf_xirr(cfg: dict) -> dict:
                     all_cashflows.append((order_date, -amount))
                 elif txn_type == "SELL":
                     all_cashflows.append((order_date, amount))
-    
+
     total_current_val = sum(h.get("quantity", 0) * h.get("last_price", 0) for h in holdings)
     if total_current_val > 0:
         all_cashflows.append((today, total_current_val))
-    
+
     portfolio_xirr = compute_xirr(all_cashflows) if len(all_cashflows) >= 2 else None
-    
+
     return {
         "funds": results,
         "portfolio_xirr_pct": round(portfolio_xirr * 100, 2) if portfolio_xirr else None,
@@ -260,21 +265,21 @@ def compute_mf_xirr(cfg: dict) -> dict:
 
 def compute_xirr(cashflows: list) -> float | None:
     """Compute XIRR using Newton-Raphson method.
-    
+
     cashflows: list of (date, amount) tuples
     Returns annualized rate or None if fails.
     """
     if len(cashflows) < 2:
         return None
-    
+
     # Convert dates to days from first cashflow
     dates = [cf[0] for cf in cashflows]
     amounts = [cf[1] for cf in cashflows]
-    
+
     # Use first date as epoch
     epoch = min(dates)
     days = [(d - epoch).days for d in dates]
-    
+
     # Initial guess: simple annualized return
     total_invested = sum(a for a in amounts if a < 0)
     total_returned = sum(a for a in amounts if a > 0)
@@ -283,19 +288,19 @@ def compute_xirr(cashflows: list) -> float | None:
     years = max(days) / 365.25 if max(days) > 0 else 1
     guess = (total_returned / abs(total_invested)) ** (1/years) - 1 if years > 0 else 0.1
     guess = max(0.01, min(guess, 10.0))  # Clamp
-    
+
     def npv(rate):
         """Net Present Value at given rate."""
         if rate <= -1:
             return float('inf')
         return sum(amounts[i] / (1 + rate) ** (days[i] / 365.25) for i in range(len(amounts)))
-    
+
     def npv_derivative(rate):
         """Derivative of NPV."""
         if rate <= -1:
             return float('inf')
         return sum(-amounts[i] * (days[i] / 365.25) / (1 + rate) ** (days[i] / 365.25 + 1) for i in range(len(amounts)))
-    
+
     # Newton-Raphson
     rate = guess
     for _ in range(100):
@@ -311,7 +316,7 @@ def compute_xirr(cashflows: list) -> float | None:
             rate = new_rate
         except Exception:
             break
-    
+
     # Validate result
     if rate <= -0.99 or rate > 100 or rate != rate:  # Sanity check (NaN check)
         return None
@@ -319,12 +324,24 @@ def compute_xirr(cashflows: list) -> float | None:
 
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: kite_bridge <auth|holdings|positions|margins|profile|status|mf-holdings|mf-orders|mf-sips|mf-xirr>", file=sys.stderr)
+    parser = argparse.ArgumentParser(description="Kite Connect Bridge for Hermes")
+    parser.add_argument("--profile", default="default", help="Profile name (default: default)")
+    parser.add_argument("--list-profiles", action="store_true", help="List configured profiles")
+    parser.add_argument("command", nargs="?", help="Command to run")
+
+    args = parser.parse_args()
+
+    if args.list_profiles:
+        from kite_auth import list_profiles
+        list_profiles()
+        return
+
+    if not args.command:
+        parser.print_help()
         sys.exit(1)
 
-    command = sys.argv[1]
-    cfg = load_config()
+    command = args.command
+    cfg = load_config(args.profile)
     sys.exit(run_command(cfg, command))
 
 
