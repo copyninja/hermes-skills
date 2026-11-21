@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 """
-Kite Connect v3 — Local Callback Server + Token Manager + Read API Tools
+Kite Connect v3 — Multi-Profile Auth + Token Manager + Read API Tools
 
 Usage:
-  python -m scripts.kite_auth auth       # Run login flow, save token
-  python -m scripts.kite_auth holdings   # GET /portfolio/holdings
-  python -m scripts.kite_auth positions  # GET /portfolio/positions
-  python -m scripts.kite_auth margins    # GET /user/margins
-  python -m scripts.kite_auth profile    # GET /user/profile
-  python -m scripts.kite_auth status     # Check token expiry
+  python -m scripts.kite_auth --profile default auth       # Run login flow, save token
+  python -m scripts.kite_auth --profile default holdings   # GET /portfolio/holdings
+  python -m scripts.kite_auth --profile second positions   # GET /portfolio/positions
+  python -m scripts.kite_auth --profile default margins    # GET /user/margins
+  python -m scripts.kite_auth --profile default profile    # GET /user/profile
+  python -m scripts.kite_auth --profile default status     # Check token expiry
+  python -m scripts.kite_auth --list-profiles              # List configured profiles
 """
 
-import asyncio
+import argparse
 import base64
 import hashlib
 import json
@@ -34,52 +35,99 @@ from cryptography.fernet import Fernet
 CONFIG_DIR = Path.home() / ".config" / "kite-connect"
 CONFIG_FILE = CONFIG_DIR / "config.toml"
 TOKEN_DIR = Path.home() / ".local" / "share" / "kite-connect"
-TOKEN_FILE = TOKEN_DIR / "token.enc"
-KEYRING_LABEL = "kite-connect"
-
-DEFAULT_CONFIG = {
-    "api_key": "",
-    "api_secret": "",
-    "redirect_url": "http://localhost:8765/kite/callback",
-    "token_file": str(TOKEN_FILE),
-    "callback_port": 8765,
-}
+KEYRING_LABEL_PREFIX = "kite-connect"
 
 KITE_API_BASE = "https://api.kite.trade"
 LOGIN_URL = "https://kite.zerodha.com/connect/login"
 
+DEFAULT_PROFILE = "default"
+
 # ─── Helpers ────────────────────────────────────────────────────────────────
 
-def load_config() -> dict:
+def load_config(profile: str = DEFAULT_PROFILE) -> dict:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     if not CONFIG_FILE.exists():
-        with open(CONFIG_FILE, "wb") as f:
-            tomli_w.dump(DEFAULT_CONFIG, f)
+        create_default_config()
         print(f"Created config template: {CONFIG_FILE}")
         print("Edit it with your api_key, api_secret (or store secret in keyring)")
         sys.exit(1)
 
     with open(CONFIG_FILE, "rb") as f:
-        cfg = tomli.load(f)
+        full_config = tomli.load(f)
+
+    profiles = full_config.get("profiles", {})
+    if profile not in profiles:
+        print(f"Error: Profile '{profile}' not found in config.")
+        print(f"Available profiles: {list(profiles.keys())}")
+        sys.exit(1)
+
+    cfg = profiles[profile]
+    cfg["profile_name"] = profile
+
+    # Set defaults
+    cfg.setdefault("redirect_url", "http://localhost:8765/kite/callback")
+    cfg.setdefault("callback_port", 8765)
+    cfg.setdefault("token_file", str(TOKEN_DIR / f"token-{profile}.enc"))
 
     # Resolve api_secret from keyring if not in config
     if not cfg.get("api_secret"):
-        try:
-            import secretstorage
-            bus = secretstorage.dbus_init()
-            collection = secretstorage.get_default_collection(bus)
-            for item in collection.get_all_items():
-                if item.get_label() == KEYRING_LABEL:
-                    cfg["api_secret"] = item.get_secret().decode()
+        # Try profile-specific label first, then fallback to legacy label
+        for label in [f"{KEYRING_LABEL_PREFIX}-{profile}", KEYRING_LABEL_PREFIX]:
+            try:
+                import secretstorage
+                bus = secretstorage.dbus_init()
+                collection = secretstorage.get_default_collection(bus)
+                for item in collection.get_all_items():
+                    if item.get_label() == label:
+                        cfg["api_secret"] = item.get_secret().decode()
+                        break
+                if cfg.get("api_secret"):
                     break
-        except Exception:
-            pass
+            except Exception:
+                pass
 
     if not cfg.get("api_key") or not cfg.get("api_secret"):
-        print("Error: api_key and api_secret must be set in config or keyring")
+        print(f"Error: api_key and api_secret must be set for profile '{profile}' (config or keyring)")
         sys.exit(1)
 
     return cfg
+
+
+def create_default_config():
+    """Create default config with single 'default' profile."""
+    default_config = {
+        "profiles": {
+            "default": {
+                "api_key": "",
+                "api_secret": "",
+                "redirect_url": "http://localhost:8765/kite/callback",
+                "token_file": str(TOKEN_DIR / "token-default.enc"),
+                "callback_port": 8765,
+            }
+        }
+    }
+    with open(CONFIG_FILE, "wb") as f:
+        tomli_w.dump(default_config, f)
+
+
+def list_profiles():
+    """List all configured profiles."""
+    if not CONFIG_FILE.exists():
+        print("No config file found.")
+        return
+
+    with open(CONFIG_FILE, "rb") as f:
+        full_config = tomli.load(f)
+
+    profiles = full_config.get("profiles", {})
+    if not profiles:
+        print("No profiles configured.")
+        return
+
+    print("Configured profiles:")
+    for name, cfg in profiles.items():
+        has_secret = "✓" if cfg.get("api_secret") else "✗ (keyring)"
+        print(f"  {name}: api_key={cfg.get('api_key', 'NOT SET')} api_secret={has_secret}")
 
 
 def get_fernet_key(cfg: dict) -> bytes:
@@ -88,6 +136,10 @@ def get_fernet_key(cfg: dict) -> bytes:
     seed = (cfg["api_secret"] + machine_id).encode()
     key = hashlib.sha256(seed).digest()
     return base64.urlsafe_b64encode(key)
+
+
+def get_token_file(cfg: dict) -> Path:
+    return Path(cfg["token_file"])
 
 
 def encrypt_token(token: str, expiry: datetime, key: bytes) -> bytes:
@@ -171,7 +223,6 @@ def run_callback_server(port: int) -> str | None:
     print("   Waiting for redirect... (browser should open)")
 
     try:
-        # Wait up to 120 seconds for callback
         for _ in range(240):
             time.sleep(0.5)
             if request_token_holder["token"]:
@@ -191,22 +242,19 @@ def do_auth(cfg: dict) -> bool:
     key = get_fernet_key(cfg)
     port = cfg.get("callback_port", 8765)
 
-    # Build login URL
     redirect_params = "source=hermes"
     login_url = f"{LOGIN_URL}?v=3&api_key={cfg['api_key']}&redirect_params={redirect_params}"
 
-    print(f"🔐 Opening browser for Kite login...")
+    print(f"🔐 Opening browser for Kite login (profile: {cfg['profile_name']})...")
     print(f"   URL: {login_url}")
     webbrowser.open(login_url)
 
-    # Wait for callback
     request_token = run_callback_server(port)
     if not request_token:
         return False
 
     print(f"📨 Got request_token, exchanging for access_token...")
 
-    # Exchange for access_token
     checksum = compute_checksum(cfg["api_key"], request_token, cfg["api_secret"])
     with httpx.Client(timeout=30) as client:
         resp = client.post(
@@ -231,13 +279,13 @@ def do_auth(cfg: dict) -> bool:
     access_token = data["data"]["access_token"]
     expiry = next_6am()
 
-    # Encrypt and save
-    TOKEN_DIR.mkdir(parents=True, exist_ok=True)
+    token_file = get_token_file(cfg)
+    token_file.parent.mkdir(parents=True, exist_ok=True)
     encrypted = encrypt_token(access_token, expiry, key)
-    TOKEN_FILE.write_bytes(encrypted)
-    os.chmod(TOKEN_FILE, 0o600)
+    token_file.write_bytes(encrypted)
+    os.chmod(token_file, 0o600)
 
-    print(f"✅ Token saved to {TOKEN_FILE}")
+    print(f"✅ Token saved to {token_file}")
     print(f"   Valid until: {expiry.strftime('%Y-%m-%d %H:%M %Z')}")
     return True
 
@@ -246,20 +294,21 @@ def do_auth(cfg: dict) -> bool:
 
 def load_token(cfg: dict) -> tuple[str, datetime] | None:
     key = get_fernet_key(cfg)
-    if not TOKEN_FILE.exists():
+    token_file = get_token_file(cfg)
+    if not token_file.exists():
         return None
-    return decrypt_token(TOKEN_FILE.read_bytes(), key)
+    return decrypt_token(token_file.read_bytes(), key)
 
 
 def api_get(cfg: dict, endpoint: str) -> dict | None:
     token_data = load_token(cfg)
     if not token_data:
-        print("❌ No valid token. Run 'kite-auth' first.")
+        print("❌ No valid token. Run 'kite-auth auth' first.")
         return None
 
     access_token, expiry = token_data
     if datetime.now() >= expiry:
-        print(f"❌ Token expired at {expiry}. Run 'kite-auth' to refresh.")
+        print(f"❌ Token expired at {expiry}. Run 'kite-auth auth' to refresh.")
         return None
 
     with httpx.Client(timeout=30) as client:
@@ -282,6 +331,8 @@ def api_get(cfg: dict, endpoint: str) -> dict | None:
 
     return data["data"]
 
+
+# ─── Command Handlers ──────────────────────────────────────────────────────
 
 def cmd_holdings(cfg: dict):
     data = api_get(cfg, "/portfolio/holdings")
@@ -307,6 +358,24 @@ def cmd_profile(cfg: dict):
         print(json.dumps(data, indent=2))
 
 
+def cmd_mf_holdings(cfg: dict):
+    data = api_get(cfg, "/mf/holdings")
+    if data:
+        print(json.dumps(data, indent=2))
+
+
+def cmd_mf_orders(cfg: dict):
+    data = api_get(cfg, "/mf/orders")
+    if data:
+        print(json.dumps(data, indent=2))
+
+
+def cmd_mf_sips(cfg: dict):
+    data = api_get(cfg, "/mf/sips")
+    if data:
+        print(json.dumps(data, indent=2))
+
+
 def cmd_status(cfg: dict):
     token_data = load_token(cfg)
     if not token_data:
@@ -327,12 +396,38 @@ def cmd_status(cfg: dict):
 # ─── Main ──────────────────────────────────────────────────────────────────
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: kite-auth <auth|holdings|positions|margins|profile|status>")
+    parser = argparse.ArgumentParser(description="Kite Connect CLI")
+    parser.add_argument("--profile", default=DEFAULT_PROFILE, help=f"Profile name (default: {DEFAULT_PROFILE})")
+    parser.add_argument("--list-profiles", action="store_true", help="List configured profiles")
+    parser.add_argument("command", nargs="?", help="Command to run")
+
+    subparsers = parser.add_subparsers(dest="subcommand", help="Commands")
+
+    # Auth commands
+    subparsers.add_parser("auth", help="Run login flow and save token")
+    subparsers.add_parser("holdings", help="GET /portfolio/holdings")
+    subparsers.add_parser("positions", help="GET /portfolio/positions")
+    subparsers.add_parser("margins", help="GET /user/margins")
+    subparsers.add_parser("profile", help="GET /user/profile")
+    subparsers.add_parser("status", help="Check token expiry")
+    subparsers.add_parser("mf-holdings", help="GET /mf/holdings")
+    subparsers.add_parser("mf-orders", help="GET /mf/orders")
+    subparsers.add_parser("mf-sips", help="GET /mf/sips")
+
+    args = parser.parse_args()
+
+    if args.list_profiles:
+        list_profiles()
+        return
+
+    if not args.command and not args.subcommand:
+        parser.print_help()
         sys.exit(1)
 
-    cmd = sys.argv[1]
-    cfg = load_config()
+    cmd = args.command or args.subcommand
+    profile = args.profile
+
+    cfg = load_config(profile)
 
     if cmd == "auth":
         ok = do_auth(cfg)
@@ -347,6 +442,12 @@ def main():
         cmd_profile(cfg)
     elif cmd == "status":
         cmd_status(cfg)
+    elif cmd == "mf-holdings":
+        cmd_mf_holdings(cfg)
+    elif cmd == "mf-orders":
+        cmd_mf_orders(cfg)
+    elif cmd == "mf-sips":
+        cmd_mf_sips(cfg)
     else:
         print(f"Unknown command: {cmd}")
         sys.exit(1)

@@ -121,7 +121,35 @@ All active and paused SIPs.
 | `xirr` field in holdings always 0 | Must compute client-side |
 | SIP status often `PAUSED` after completion | Completed SIPs show as PAUSED; check `completed_instalments` |
 
-## XIRR Calculation Notes
+## Debt Fund Tax Rules (Pre-Apr'23 Purchases)
+
+| Fund Type | Holding | Tax Treatment | Exemption |
+|-----------|---------|---------------|-----------|
+| **Debt fund (pre-Apr'23)** | >3 years | **20% LTCG with indexation** | **NO ₹1.25L exemption** (equity only) |
+| Debt fund (pre-Apr'23) | <3 years | STCG @ slab | None |
+| Debt fund (post-Apr'23) | Any | STCG @ slab | None |
+| **Arbitrage fund (equity-oriented)** | >1 year | 12.5% LTCG | **₹1.25L/yr exemption** |
+| Arbitrage fund | <1 year | 20% STCG | None |
+
+**Key**: Pre-April 2023 debt funds held >3 years get indexation benefit. The ₹1.25L LTCG exemption applies ONLY to equity funds (including arbitrage). Debt funds never get this exemption.
+
+### Example: ABSL Floating Rate Fund (Pre-2023 Purchase)
+- Invested: ₹522K | Current: ₹763K | Gain: ₹240K (46%)
+- Indexed cost (CII 363/317): ₹598K
+- Indexed gain: ₹165K
+- **Tax (20.8% with indexation): ~₹34K**
+- **Post-tax proceeds: ~₹729K**
+
+## Portfolio Construction Rules (User Preferences)
+
+| Rule | Rationale |
+|------|-----------|
+| **Single arbitrage fund** | One fund (Kotak Arbitrage Direct) covers debt/arbitrage bucket. Multiple funds add complexity without diversification. |
+| **Consolidate large cap** | Nifty 50 ETF (NIFTYBEES) + one active large cap fund OR one index MF. Not both ETF + multiple index MFs. |
+| **STP from liquid/large cap** | Source fund for STPs should be a liquid fund or large cap fund being phased out. Each instalment = taxable redemption. |
+| **Read-only mode default** | Skill operates in analysis/read-only mode until user explicitly requests execution. No transactions without explicit instruction. |
+
+## Rate Limits
 
 The bridge implements XIRR using Newton-Raphson on cashflows:
 - BUY orders → negative cashflow (outflow)
